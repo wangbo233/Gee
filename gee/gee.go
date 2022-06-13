@@ -3,6 +3,7 @@ package gee
 import (
 	"log"
 	"net/http"
+	"strings"
 )
 
 type HandlerFunc func(*Context)
@@ -64,6 +65,20 @@ func (engine *Engine) Run(addr string) (err error) {
 
 // 使用Engine实现http.Handler接口
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// 当我们接收到一个具体请求时，要判断该请求适用于哪些中间件，在这里我们简单通过URL的前缀来判断。
+	// 得到中间件列表后，赋值给 c.handlers
+	var middlewares []HandlerFunc
+	for _, group := range engine.groups {
+		if strings.HasPrefix(req.URL.Path, group.prefix) {
+			middlewares = append(middlewares, group.middlewares...)
+		}
+	}
 	c := newContext(w, req)
+	c.handlers = middlewares
 	engine.router.handle(c)
+}
+
+// Use 将中间件加入group中
+func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
+	group.middlewares = append(group.middlewares, middlewares...)
 }
