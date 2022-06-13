@@ -17,6 +17,8 @@ type Context struct {
 	Method string
 	// response的信息
 	StatusCode int
+	// 从路由中解析到的参数
+	Params map[string]string
 }
 
 func newContext(w http.ResponseWriter, req *http.Request) *Context {
@@ -70,4 +72,9 @@ func (c *Context) HTML(code int, html string) {
 	c.SetHeader("Content-Type", "text/html")
 	c.Status(code)
 	c.Writer.Write([]byte(html))
+}
+
+func (c *Context) Param(key string) string {
+	value, _ := c.Params[key]
+	return value
 }
