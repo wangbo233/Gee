@@ -1,8 +1,10 @@
 package gee
 
 import (
+	"html/template"
 	"log"
 	"net/http"
+	"path"
 	"strings"
 )
 
@@ -11,9 +13,14 @@ type HandlerFunc func(*Context)
 // Engine 这个结构体用于实现http.Handler接口
 // 整个框架的所有资源都是由Engine统一协调的
 type Engine struct {
-	*RouterGroup //采用组合的方式，使得Engine具有分组的所有方法，也就是说Engine可以作为最顶层的分组
-	router       *router
-	groups       []*RouterGroup //存储所有的分组
+	//采用组合的方式，使得Engine具有分组的所有方法，也就是说Engine可以作为最顶层的分组
+	*RouterGroup
+	router *router
+	//存储所有的分组
+	groups []*RouterGroup
+	// html渲染
+	htmlTemplates *template.Template
+	funcMap       template.FuncMap
 }
 
 type RouterGroup struct {
@@ -75,10 +82,51 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	c := newContext(w, req)
 	c.handlers = middlewares
+	c.engine = engine
 	engine.router.handle(c)
 }
 
 // Use 将中间件加入group中
 func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
 	group.middlewares = append(group.middlewares, middlewares...)
+}
+
+// create static handler
+func (group *RouterGroup) createStaticHandler(relativePath string, fs http.FileSystem) HandlerFunc {
+	absolutePath := path.Join(group.prefix, relativePath)
+	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))
+	return func(c *Context) {
+		file := c.Param("filepath")
+		// 检查文件是否存在，并且我们是否有权限
+		if _, err := fs.Open(file); err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		fileServer.ServeHTTP(c.Writer, c.Req)
+	}
+}
+
+// Static 将磁盘上的某个文件夹root映射到路由relativePath
+func (group *RouterGroup) Static(relativePath string, root string) {
+	handler := group.createStaticHandler(relativePath, http.Dir(root))
+	urlPattern := path.Join(relativePath, "/*filepath")
+	// 注册
+	group.GET(urlPattern, handler)
+}
+
+// SetFuncMap 自定义渲染函数
+func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
+	engine.funcMap = funcMap
+}
+
+// LoadHTMLGlob 加载模板
+func (engine *Engine) LoadHTMLGlob(pattern string) {
+	engine.htmlTemplates = template.Must(template.New("").Funcs(engine.funcMap).ParseGlob(pattern))
+}
+
+// Default 默认使用Logger和Recovery中间件
+func Default() *Engine {
+	engine := New()
+	engine.Use(Logger(), Recovery())
+	return engine
 }
